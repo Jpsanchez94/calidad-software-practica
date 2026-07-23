@@ -1,6 +1,7 @@
 """
 Sistema de Gestion de Pedidos
 Calidad de Software - Version corregida para pytest
+Practica de GitHub Actions - JEFFERSON SANCHEZ
 """
 
 import os
