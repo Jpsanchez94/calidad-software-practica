@@ -78,3 +78,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+# Cambio para activar GitHub Actions
+# Prueba de GitHub Actions
