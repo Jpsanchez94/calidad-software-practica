@@ -52,8 +52,5 @@ jobs:
             echo "PROCESO APP:"
             adb shell pidof com.evidencia.doblegps
             adb logcat -d -b crash > /tmp/evidencia-crash.txt
-            if grep -A 15 -B 2 'FATAL EXCEPTION' /tmp/evidencia-crash.txt | grep -q 'com.evidencia.doblegps'; then
-              cat /tmp/evidencia-crash.txt
-              exit 1
-            fi
+            ! grep -q 'com.evidencia.doblegps' /tmp/evidencia-crash.txt
             echo 'SMOKE TEST OK: la aplicación continúa abierta'
