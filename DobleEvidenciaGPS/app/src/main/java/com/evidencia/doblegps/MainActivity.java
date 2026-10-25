@@ -87,7 +87,7 @@ public class MainActivity extends Activity {
         long capturedAt;
         Location location;
         boolean processing, mapReady, failed;
-        String city, sector, valley, province;
+        String city, sector, valley, province, street;
         String error;
     }
 
@@ -499,34 +499,72 @@ public class MainActivity extends Activity {
         while(shortText.length()>2 && paint.measureText(shortText+"…")>maxWidth)shortText=shortText.substring(0,shortText.length()-1);
         return shortText+"…";
     }
+    /** Selecciona la dirección con mayor detalle disponible; nunca completa números inexistentes. */
     private void enrichAddress(Frame f){
         f.city="";f.sector="";f.valley="";f.province="";
+        f.street="";
         if(f.location==null)return;
-        try {
+        try{
             if(!Geocoder.isPresent())return;
             Geocoder coder=new Geocoder(this,new Locale("es","EC"));
-            List<Address> locations=coder.getFromLocation(
-                f.location.getLatitude(),f.location.getLongitude(),1);
-            if(locations==null||locations.isEmpty())return;
-            Address address=locations.get(0);
-            String city=firstNonEmpty(address.getLocality(),address.getSubAdminArea());
-            String province=part(address.getAdminArea());
+            List<Address> all=coder.getFromLocation(
+                f.location.getLatitude(),f.location.getLongitude(),3);
+            if(all==null||all.isEmpty())return;
+            Address best=null;
+            int score=-1;
+            for(Address address:all){
+                int points=0;
+                if(!part(address.getThoroughfare()).isEmpty())points+=8;
+                if(!part(address.getSubThoroughfare()).isEmpty())points+=5;
+                if(!part(address.getSubLocality()).isEmpty())points+=4;
+                if(!part(address.getFeatureName()).isEmpty())points+=1;
+                if(!part(address.getLocality()).isEmpty())points+=2;
+                if(!part(address.getAddressLine(0)).isEmpty())points+=3;
+                if(points>score){score=points;best=address;}
+            }
+            if(best==null)return;
+            String city=firstNonEmpty(best.getLocality(),best.getSubAdminArea());
+            String province=part(best.getAdminArea());
             f.city=city;
             f.province=province;
-            if(!province.isEmpty() && !city.equalsIgnoreCase(province))f.city=city+" • "+province;
-            String sector=firstNonEmpty(address.getSubLocality(),address.getThoroughfare(),address.getFeatureName());
-            String main=firstNonEmpty(address.getAddressLine(0),sector);
-            // Solo etiquetar "Valle" cuando aparece en la geocodificación real.
-            String[] tokens = {city,sector,main,address.getSubAdminArea()};
-            for(String t:tokens){
-                if(t!=null && t.toLowerCase(Locale.ROOT).contains("valle")){
-                    f.valley=t;
-                    break;
+            if(!province.isEmpty()&&!city.equalsIgnoreCase(province)){
+                f.city=city.isEmpty()?province:city+" • "+province;
+            }
+            String street=part(best.getThoroughfare());
+            String number=part(best.getSubThoroughfare());
+            String reference=part(best.getFeatureName());
+            String complete=part(best.getAddressLine(0));
+            String neighborhood=part(best.getSubLocality());
+            if(!street.isEmpty()){
+                f.street=street+(number.isEmpty()?"":(" "+number));
+            } else if(!complete.isEmpty()){
+                // La línea completa puede aportar una calle cuando falta thoroughfare.
+                f.street=complete;
+            } else if(!reference.isEmpty()&&!reference.equalsIgnoreCase(city)){
+                f.street=reference;
+            }
+            if(!neighborhood.isEmpty()&&!neighborhood.equalsIgnoreCase(city)){
+                f.sector="Barrio/sector: "+neighborhood;
+            } else if(!reference.isEmpty()&&!reference.equalsIgnoreCase(street)
+                    && !reference.equalsIgnoreCase(city)){
+                f.sector="Referencia: "+reference;
+            } else {
+                String parish=part(best.getSubAdminArea());
+                if(!parish.equalsIgnoreCase(city)&&!parish.equalsIgnoreCase(province)){
+                    f.sector="Parroquia/sector: "+parish;
                 }
             }
-            f.sector=sector.isEmpty()?"":("Sector: "+sector);
-            if(!f.valley.isEmpty() && f.sector.equalsIgnoreCase("Sector: "+f.valley))f.sector="";
-        }catch(Exception ignored){}
+            for(String part:new String[]{neighborhood,part(best.getSubAdminArea()),complete}){
+                if(part!=null&&part.toLowerCase(Locale.ROOT).contains("valle")){
+                    f.valley=part;break;
+                }
+            }
+            if(f.street.equalsIgnoreCase(f.city)||f.street.equalsIgnoreCase(province)){
+                f.street="";
+            }
+        }catch(Exception ignored){
+            // Sin datos suficientes: no inventar una dirección exacta.
+        }
     }
 
     private Bitmap stamp(Bitmap source,Bitmap map,Frame f){
@@ -551,26 +589,29 @@ public class MainActivity extends Activity {
         p.setColor(Color.WHITE);
         c.drawRoundRect(new RectF(mapX-3,mapY-3,mapX+mapW+3,mapY+mapH+3),8,8,p);
         c.drawBitmap(map,null,new Rect(mapX,mapY,mapX+mapW,mapY+mapH),p);
-        p.setColor(Color.argb(78,5,11,17));
-        c.drawRoundRect(new RectF(374,PANE_H-314,PANE_W-10,PANE_H-18),14,14,p);
+        p.setColor(Color.argb(80,5,11,17));
+        c.drawRoundRect(new RectF(374,PANE_H-420,PANE_W-10,PANE_H-17),14,14,p);
         p.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         p.setTextAlign(Paint.Align.RIGHT);
         p.setShadowLayer(3,1,2,Color.BLACK);
         p.setColor(Color.WHITE);
         float x=PANE_W-31;
-        p.setTextSize(43);
-        c.drawText(formatDate(f.capturedAt),x,PANE_H-260,p);
-        p.setTextSize(52);
-        c.drawText(formatTime(f.capturedAt),x,PANE_H-202,p);
-        p.setTextSize(33);
-        c.drawText(fitLabel(part(f.city),p,645),x,PANE_H-147,p);
-        if(!part(f.valley).isEmpty()){
-            p.setTextSize(30);
-            c.drawText(fitLabel(f.valley,p,645),x,PANE_H-98,p);
-        }
+        p.setTextSize(40);
+        c.drawText(formatDate(f.capturedAt),x,PANE_H-367,p);
+        p.setTextSize(50);
+        c.drawText(formatTime(f.capturedAt),x,PANE_H-309,p);
+        p.setTextSize(30);
+        String street=part(f.street).isEmpty()?"Calle sin registrar":f.street;
+        c.drawText(fitLabel(street,p,646),x,PANE_H-246,p);
+        p.setTextSize(29);
         if(!part(f.sector).isEmpty()){
+            c.drawText(fitLabel(f.sector,p,646),x,PANE_H-188,p);
+        }
+        p.setTextSize(33);
+        c.drawText(fitLabel(part(f.city),p,646),x,PANE_H-125,p);
+        if(!part(f.valley).isEmpty()){
             p.setTextSize(29);
-            c.drawText(fitLabel(f.sector,p,645),x,PANE_H-51,p);
+            c.drawText(fitLabel(f.valley,p,646),x,PANE_H-68,p);
         }
         p.clearShadowLayer();
         return out;
