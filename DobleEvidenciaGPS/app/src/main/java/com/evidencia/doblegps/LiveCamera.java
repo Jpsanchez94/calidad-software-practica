@@ -156,7 +156,7 @@ final class LiveCamera {
             }
             if(jpeg==null)jpeg=map.getOutputSizes(ImageFormat.JPEG)[0];
             reader=ImageReader.newInstance(jpeg.getWidth(),jpeg.getHeight(),ImageFormat.JPEG,2);
-            reader.setOnImageAvailableListener(onImage,handler);
+            reader.setOnImageAvailableListener(this::onImage,handler);
             SurfaceTexture surface=texture.getSurfaceTexture();
             if(surface==null)throw new Exception("Preview no disponible");
             surface.setDefaultBufferSize(previewSize.getWidth(),previewSize.getHeight());
@@ -203,7 +203,7 @@ final class LiveCamera {
             },handler);
         }catch(Exception e){finish(false,e.getMessage());}
     }
-    private final ImageReader.OnImageAvailableListener onImage=r->{
+    private void onImage(ImageReader r){
         Image image=null;
         try{
             image=r.acquireNextImage();
@@ -219,7 +219,7 @@ final class LiveCamera {
             finish(true,"");
         }catch(Exception e){finish(false,e.getMessage());}
         finally{if(image!=null)image.close();}
-    };
+    }
     private void finish(boolean ok,String why){
         Result cb=result;result=null;output=null;shooting=false;
         if(cb!=null)activity.runOnUiThread(()->cb.done(ok,why));
