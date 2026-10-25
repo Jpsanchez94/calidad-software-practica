@@ -12,7 +12,7 @@
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:usesCleartextTraffic="false">
         <activity android:name=".EvidenceViewerActivity"
-            android:exported="false" android:screenOrientation="sensorLandscape"/>
+            android:exported="false" android:screenOrientation="portrait"/>
         <activity android:name=".MainActivity" android:exported="true"
             android:screenOrientation="portrait">
             <intent-filter>
