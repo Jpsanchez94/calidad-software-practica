@@ -17,6 +17,11 @@ import android.graphics.RectF;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
+import android.location.Address;
+import android.location.Geocoder;
+import android.view.TextureView;
+import android.text.TextUtils;
+import java.util.List;
 import android.media.ExifInterface;
 import android.net.Uri;
 import android.os.Bundle;
@@ -45,7 +50,7 @@ import java.util.concurrent.Executors;
 public class MainActivity extends Activity {
     private static final int LOCATION_REQUEST = 41, CAMERA_REQUEST = 42;
     private static final int BG = Color.rgb(12, 23, 38);
-    private static final int PANE_W = 1060, PANE_H = 1100, FOOTER_H = 142;
+    private static final int PANE_W = 1060, PANE_H = 1100;
     private static final long TILE_CACHE_MS = 7L * 24 * 60 * 60 * 1000;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Frame[] frames = {new Frame(), new Frame()};
@@ -60,7 +65,10 @@ public class MainActivity extends Activity {
         }
     };
 
-    private TextView gpsLabel, waitLabel, firstLabel, secondLabel, statusLabel;
+    private TextView gpsLabel, waitLabel, firstLabel, secondLabel, statusLabel, cameraStatus;
+    private TextureView livePreview;
+    private LiveCamera liveCamera;
+    private long pendingPhotoTime;
     private ImageView firstPreview, secondPreview, finalPreview;
     private Button firstButton, secondButton, retryButton, saveButton, openButton, shareButton;
     private Uri pendingOriginal, compositeUri;
@@ -75,6 +83,7 @@ public class MainActivity extends Activity {
         long capturedAt;
         Location location;
         boolean processing, mapReady, failed;
+        String city, sector, valley, province;
         String error;
     }
 
@@ -85,11 +94,13 @@ public class MainActivity extends Activity {
         getWindow().setNavigationBarColor(BG);
         locationManager = (LocationManager) getSystemService(LOCATION_SERVICE);
         makeUi();
-        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED ||
+            checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[] {
-                Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION
+                Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION,
+                Manifest.permission.CAMERA
             }, LOCATION_REQUEST);
-        } else startLocation();
+        } else { startLocation(); liveCamera.start(); }
         updateUi();
     }
 
@@ -139,6 +150,13 @@ public class MainActivity extends Activity {
 
         gpsLabel = text("Buscando ubicación GPS...", 13, Color.rgb(132, 214, 240));
         main.addView(gpsLabel);
+        cameraStatus = text("Iniciando cámara gran angular en vivo...", 13, Color.rgb(151,215,239));
+        main.addView(cameraStatus);
+        livePreview = new TextureView(this);
+        livePreview.setOpaque(true);
+        livePreview.setBackgroundColor(Color.BLACK);
+        main.addView(livePreview,new LinearLayout.LayoutParams(-1,dp(285)));
+        liveCamera = new LiveCamera(this,livePreview,message -> cameraStatus.setText(message));
         firstButton = button(main, "TOMAR PRIMERA FOTOGRAFÍA", () -> capture(0));
         firstLabel = text("Primera captura pendiente", 12, Color.LTGRAY);
         main.addView(firstLabel);
@@ -179,7 +197,11 @@ public class MainActivity extends Activity {
     }
     @Override public void onRequestPermissionsResult(int request, String[] permissions, int[] grants) {
         super.onRequestPermissionsResult(request, permissions, grants);
-        if (request == LOCATION_REQUEST) startLocation();
+        if (request == LOCATION_REQUEST) {
+            startLocation();
+            if (checkSelfPermission(Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED) liveCamera.start();
+            else cameraStatus.setText("Permiso de cámara denegado.");
+        }
         refreshGps();
     }
     private Location currentLocation() {
@@ -216,19 +238,19 @@ public class MainActivity extends Activity {
         }
         Uri uri = createImage("Original_" + sessionToken + "_" + (index+1) + ".jpg");
         if (uri == null) { toast("No se pudo crear el archivo de la cámara."); return; }
-        pendingOriginal = uri;
-        launchLocation = currentLocation();
-        pendingSlot = index;
-        Intent capture = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
-        capture.putExtra(MediaStore.EXTRA_OUTPUT, uri);
-        capture.setClipData(android.content.ClipData.newRawUri("Evidencia",uri));
-        capture.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-        try { startActivityForResult(capture, CAMERA_REQUEST); }
-        catch (Exception e) {
+        pendingOriginal=uri;
+        launchLocation=currentLocation();
+        pendingSlot=index;
+        pendingPhotoTime=System.currentTimeMillis();
+        if(liveCamera==null || !liveCamera.isReady()){
             getContentResolver().delete(uri,null,null);
             pendingSlot=-1;pendingOriginal=null;
-            toast("No hay cámara disponible.");
+            toast("La cámara en vivo todavía no está lista.");return;
         }
+        liveCamera.snap(uri,(ok,why)->{
+            if(!ok)toast("Error en cámara: "+why);
+            onActivityResult(CAMERA_REQUEST,ok?RESULT_OK:RESULT_CANCELED,null);
+        });
     }
     private Uri createImage(String name) {
         try {
@@ -260,7 +282,7 @@ public class MainActivity extends Activity {
         final Frame f = new Frame();
         f.original=image;
         f.location=coords;
-        f.capturedAt=System.currentTimeMillis();
+        f.capturedAt=pendingPhotoTime;
         f.processing=true;
         frames[slot]=f;
         compositeUri=null;
@@ -313,6 +335,8 @@ public class MainActivity extends Activity {
                 }
             });
             if (f.location == null) throw new Exception("Ubicación GPS no disponible; activa GPS para nueva captura.");
+            // El mapa y la geocodificación se calculan fuera de la pantalla de cámara.
+            enrichAddress(f);
             Bitmap map = loadRealMap(f.location);
             Bitmap annotated = stamp(source,map,f);
             if (requestedSession != sessionToken || frames[index] != f) return;
@@ -428,6 +452,52 @@ public class MainActivity extends Activity {
             if(temp.exists())temp.delete();
         }
     }
+
+    private static String part(String in){
+        if(in==null)return "";
+        return in.trim();
+    }
+    private static String firstNonEmpty(String... values) {
+        for(String s:values)if(!part(s).isEmpty())return part(s);
+        return "";
+    }
+    private String fitLabel(String label,Paint paint,float maxWidth){
+        if(label==null)return "";
+        if(paint.measureText(label)<=maxWidth)return label;
+        String shortText=label;
+        while(shortText.length()>2 && paint.measureText(shortText+"…")>maxWidth)shortText=shortText.substring(0,shortText.length()-1);
+        return shortText+"…";
+    }
+    private void enrichAddress(Frame f){
+        f.city="";f.sector="";f.valley="";f.province="";
+        if(f.location==null)return;
+        try {
+            if(!Geocoder.isPresent())return;
+            Geocoder coder=new Geocoder(this,new Locale("es","EC"));
+            List<Address> locations=coder.getFromLocation(
+                f.location.getLatitude(),f.location.getLongitude(),1);
+            if(locations==null||locations.isEmpty())return;
+            Address address=locations.get(0);
+            String city=firstNonEmpty(address.getLocality(),address.getSubAdminArea());
+            String province=part(address.getAdminArea());
+            f.city=city;
+            f.province=province;
+            if(!province.isEmpty() && !city.equalsIgnoreCase(province))f.city=city+" • "+province;
+            String sector=firstNonEmpty(address.getSubLocality(),address.getThoroughfare(),address.getFeatureName());
+            String main=firstNonEmpty(address.getAddressLine(0),sector);
+            // Solo etiquetar "Valle" cuando aparece en la geocodificación real.
+            String[] tokens = {city,sector,main,address.getSubAdminArea()};
+            for(String t:tokens){
+                if(t!=null && t.toLowerCase(Locale.ROOT).contains("valle")){
+                    f.valley=t;
+                    break;
+                }
+            }
+            f.sector=sector.isEmpty()?"":("Sector: "+sector);
+            if(!f.valley.isEmpty() && f.sector.equalsIgnoreCase("Sector: "+f.valley))f.sector="";
+        }catch(Exception ignored){}
+    }
+
     private Bitmap stamp(Bitmap source, Bitmap map, Frame f) {
         Bitmap canvasBitmap=Bitmap.createBitmap(PANE_W,PANE_H,Bitmap.Config.ARGB_8888);
         Canvas canvas=new Canvas(canvasBitmap);
@@ -456,7 +526,7 @@ public class MainActivity extends Activity {
                 mapLeft+mapWidth+3,mapBottom+3),8,8,p);
         canvas.drawBitmap(map,mapLeft,mapBottom-mapHeight,p);
         // Información blanca, grande y semitransparente, sin "Foto 1/2".
-        int boxLeft=384, boxTop=PANE_H-310;
+        int boxLeft=384, boxTop=PANE_H-395;
         p.setColor(Color.argb(95,4,8,12));
         canvas.drawRoundRect(new RectF(boxLeft,boxTop,PANE_W-12,PANE_H-16),18,18,p);
         p.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
@@ -465,16 +535,21 @@ public class MainActivity extends Activity {
         p.setColor(Color.WHITE);
         p.setTextSize(40);
         float right=PANE_W-31;
-        canvas.drawText(formatDate(f.capturedAt),right,PANE_H-250,p);
+        canvas.drawText(formatDate(f.capturedAt),right,PANE_H-330,p);
         p.setTextSize(50);
-        canvas.drawText(formatTime(f.capturedAt),right,PANE_H-183,p);
+        canvas.drawText(formatTime(f.capturedAt),right,PANE_H-271,p);
         p.setTextSize(31);
         canvas.drawText(String.format(Locale.US,"%.6f, %.6f",f.location.getLatitude(),
-            f.location.getLongitude()),right,PANE_H-127,p);
+            f.location.getLongitude()),right,PANE_H-217,p);
         p.setTextSize(28);
         if(f.location.hasAccuracy()){
-            canvas.drawText(String.format(Locale.US,"GPS ±%.0f m",f.location.getAccuracy()),right,PANE_H-79,p);
+            canvas.drawText(String.format(Locale.US,"GPS ±%.0f m",f.location.getAccuracy()),right,PANE_H-172,p);
         }
+        p.setTextSize(31);
+        canvas.drawText(fitLabel(f.city, p, 638),right,PANE_H-124,p);
+        p.setTextSize(29);
+        canvas.drawText(fitLabel(f.valley, p, 638),right,PANE_H-81,p);
+        canvas.drawText(fitLabel(f.sector, p, 638),right,PANE_H-39,p);
         p.clearShadowLayer();
         p.setTextAlign(Paint.Align.LEFT);
         return canvasBitmap;
@@ -508,23 +583,26 @@ public class MainActivity extends Activity {
         saveButton.setEnabled(false);
         worker.execute(() -> {
             try{
-                Bitmap whole=Bitmap.createBitmap(PANE_W*2,PANE_H+FOOTER_H,Bitmap.Config.ARGB_8888);
+                Bitmap whole=Bitmap.createBitmap(PANE_W*2,PANE_H,Bitmap.Config.ARGB_8888);
                 Canvas c=new Canvas(whole);
                 Paint p=new Paint(3);
                 c.drawColor(BG);
                 c.drawBitmap(a.preview,0,0,p);
                 c.drawBitmap(b.preview,PANE_W,0,p);
-                p.setColor(Color.WHITE);
-                c.drawRect(PANE_W-3,0,PANE_W+3,PANE_H,p);
-                p.setColor(Color.rgb(14,22,33));
-                c.drawRect(0,PANE_H,PANE_W*2,PANE_H+FOOTER_H,p);
+                p.setColor(Color.argb(190,250,250,250));
+                c.drawRect(PANE_W-2,0,PANE_W+2,PANE_H,p);
+                // Franja flotante centrada, realmente encima de ambas fotografías.
+                float middleY=PANE_H*0.49f;
+                p.setColor(Color.argb(182,9,17,26));
+                c.drawRoundRect(new RectF(PANE_W-350,middleY-102,
+                    PANE_W+350,middleY+110),24,24,p);
                 p.setTextAlign(Paint.Align.CENTER);
-                p.setColor(Color.rgb(255,64,76));
+                p.setColor(Color.rgb(255,65,79));
                 p.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-                p.setTextSize(48);
-                c.drawText("TIEMPO DE ESPERA",PANE_W,PANE_H+54,p);
-                p.setTextSize(65);
-                c.drawText(elapsed(),PANE_W,PANE_H+122,p);
+                p.setTextSize(49);
+                c.drawText("TIEMPO DE ESPERA",PANE_W,middleY-17,p);
+                p.setTextSize(78);
+                c.drawText(elapsed(),PANE_W,middleY+75,p);
                 if(current!=sessionToken)return;
                 Uri target=createImage("Tiempo_de_espera_"+current+".jpg");
                 if(target==null)throw new Exception("No se pudo crear el JPG");
@@ -620,9 +698,18 @@ public class MainActivity extends Activity {
         return desc+(frame.mapReady?" • Mapa integrado":frame.failed?" • Falta mapa":" • Preparando mapa...");
     }
     private void toast(String text){Toast.makeText(this,text,Toast.LENGTH_LONG).show();}
-    @Override protected void onResume(){super.onResume();startLocation();}
+    @Override protected void onResume(){
+        super.onResume();
+        startLocation();
+        if(liveCamera!=null && checkSelfPermission(Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED) liveCamera.start();
+    }
+    @Override protected void onPause(){
+        if(liveCamera!=null)liveCamera.stop();
+        super.onPause();
+    }
     @Override protected void onDestroy(){
         if(locationManager!=null&&locationActive)try{locationManager.removeUpdates(gpsListener);}catch(Exception ignored){}
+        if(liveCamera!=null)liveCamera.stop();
         worker.shutdown();
         super.onDestroy();
     }
