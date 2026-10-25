@@ -244,22 +244,36 @@ public class MainActivity extends Activity {
         refreshGps();
     }
     private Location currentLocation() {
-        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return null;
-        for (String provider : new String[]{LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
+        if(checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)!=PackageManager.PERMISSION_GRANTED
+            ||locationManager==null)return null;
+        Location chosen=null;
+        float bestScore=Float.MAX_VALUE;
+        java.util.ArrayList<Location> candidates=new java.util.ArrayList<>();
+        if(bestLocation!=null)candidates.add(bestLocation);
+        for(String provider:new String[]{LocationManager.GPS_PROVIDER,LocationManager.NETWORK_PROVIDER}){
             try {
-                Location l = locationManager.getLastKnownLocation(provider);
-                if (l != null && (bestLocation == null ||
-                    l.getElapsedRealtimeNanos() > bestLocation.getElapsedRealtimeNanos())) bestLocation = new Location(l);
-            } catch (Exception ignored) {}
+                Location loc=locationManager.getLastKnownLocation(provider);
+                if(loc!=null)candidates.add(loc);
+            }catch(Exception ignored){}
         }
-        if (bestLocation == null) return null;
-        long age = SystemClock.elapsedRealtime() - bestLocation.getElapsedRealtimeNanos()/1000000L;
-        return age >= 0 && age <= 60000 ? new Location(bestLocation) : null;
+        long now=SystemClock.elapsedRealtime();
+        for(Location loc:candidates){
+            long age=now-loc.getElapsedRealtimeNanos()/1000000L;
+            if(age<0||age>45000)continue;
+            float accuracy=loc.hasAccuracy()?loc.getAccuracy():150f;
+            // Se evita sustituir una lectura precisa por otra reciente pero inexacta.
+            float score=accuracy*2f+age/2500f;
+            if(score<bestScore){chosen=loc;bestScore=score;}
+        }
+        return chosen==null?null:new Location(chosen);
     }
     private void refreshGps() {
-        if (gpsLabel == null) return;
-        Location l = currentLocation();
-        gpsLabel.setText(l==null?"Buscando ubicación para el mapa...":"Ubicación lista para el mapa");
+        if(gpsLabel==null)return;
+        Location position=currentLocation();
+        if(position==null)gpsLabel.setText("Buscando ubicación precisa...");
+        else if(!position.hasAccuracy()||position.getAccuracy()>35f){
+            gpsLabel.setText("Mejorando la precisión de la ubicación...");
+        }else gpsLabel.setText("Ubicación precisa lista");
     }
 
     private void capture(int index) {
@@ -270,13 +284,14 @@ public class MainActivity extends Activity {
         if (frames[index].original != null) {
             toast("Inicia una nueva evidencia para volver a tomarla."); return;
         }
-        if (currentLocation() == null) {
-            toast("Para asegurar el mapa, activa ubicación precisa y espera la señal GPS."); return;
+        Location fix=currentLocation();
+        if(fix==null||!fix.hasAccuracy()||fix.getAccuracy()>35f){
+            toast("Espera una ubicación precisa para identificar bien la calle y el sector.");return;
         }
         Uri uri = createImage("Original_" + sessionToken + "_" + (index+1) + ".jpg");
         if (uri == null) { toast("No se pudo crear el archivo de la cámara."); return; }
         pendingOriginal=uri;
-        launchLocation=currentLocation();
+        launchLocation=fix;
         pendingSlot=index;
         pendingPhotoTime=System.currentTimeMillis();
         if(liveCamera==null || !liveCamera.isReady()){
@@ -519,7 +534,7 @@ public class MainActivity extends Activity {
                 if(!part(address.getSubLocality()).isEmpty())points+=4;
                 if(!part(address.getFeatureName()).isEmpty())points+=1;
                 if(!part(address.getLocality()).isEmpty())points+=2;
-                if(!part(address.getAddressLine(0)).isEmpty())points+=3;
+                if(address.getMaxAddressLineIndex()>=0 && !part(address.getAddressLine(0)).isEmpty())points+=3;
                 if(points>score){score=points;best=address;}
             }
             if(best==null)return;
@@ -533,7 +548,7 @@ public class MainActivity extends Activity {
             String street=part(best.getThoroughfare());
             String number=part(best.getSubThoroughfare());
             String reference=part(best.getFeatureName());
-            String complete=part(best.getAddressLine(0));
+            String complete=best.getMaxAddressLineIndex()>=0?part(best.getAddressLine(0)):"";
             String neighborhood=part(best.getSubLocality());
             if(!street.isEmpty()){
                 f.street=street+(number.isEmpty()?"":(" "+number));
