@@ -8,8 +8,8 @@ android {
         applicationId 'com.evidencia.doblegps'
         minSdk 29
         targetSdk 32
-        versionCode 5
-        versionName '3.2'
+        versionCode 6
+        versionName '3.3'
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
