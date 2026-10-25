@@ -100,7 +100,7 @@ public class MainActivity extends Activity {
                 Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION,
                 Manifest.permission.CAMERA
             }, LOCATION_REQUEST);
-        } else { startLocation(); liveCamera.start(); }
+        } else { startLocation(); startCameraSafely(); }
         updateUi();
     }
 
@@ -146,7 +146,7 @@ public class MainActivity extends Activity {
         TextView heading = text("DOBLE EVIDENCIA GPS", 22, Color.WHITE);
         heading.setTypeface(null, 1);
         main.addView(heading);
-        main.addView(text("V2 • Horizontal • Mapas integrados", 13, Color.rgb(170, 189, 207)));
+        main.addView(text("V3.1 • Cámara integrada • Mapas GPS", 13, Color.rgb(170, 189, 207)));
 
         gpsLabel = text("Buscando ubicación GPS...", 13, Color.rgb(132, 214, 240));
         main.addView(gpsLabel);
@@ -154,7 +154,7 @@ public class MainActivity extends Activity {
         main.addView(cameraStatus);
         livePreview = new TextureView(this);
         livePreview.setOpaque(true);
-        livePreview.setBackgroundColor(Color.BLACK);
+        // TextureView no permite fondos Drawable; configurarlo provoca crash al iniciar.
         main.addView(livePreview,new LinearLayout.LayoutParams(-1,dp(285)));
         liveCamera = new LiveCamera(this,livePreview,message -> cameraStatus.setText(message));
         firstButton = button(main, "TOMAR PRIMERA FOTOGRAFÍA", () -> capture(0));
@@ -185,6 +185,15 @@ public class MainActivity extends Activity {
         setContentView(scroll);
     }
 
+    private void startCameraSafely() {
+        if(liveCamera==null || checkSelfPermission(Manifest.permission.CAMERA)!=PackageManager.PERMISSION_GRANTED)return;
+        try {
+            liveCamera.start();
+        } catch (RuntimeException error) {
+            if(cameraStatus!=null)cameraStatus.setText("La cámara no pudo iniciar: "+error.getClass().getSimpleName());
+        }
+    }
+
     private void startLocation() {
         if (locationActive || locationManager == null ||
             checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return;
@@ -199,7 +208,7 @@ public class MainActivity extends Activity {
         super.onRequestPermissionsResult(request, permissions, grants);
         if (request == LOCATION_REQUEST) {
             startLocation();
-            if (checkSelfPermission(Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED) liveCamera.start();
+            if (checkSelfPermission(Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED) startCameraSafely();
             else cameraStatus.setText("Permiso de cámara denegado.");
         }
         refreshGps();
@@ -701,7 +710,7 @@ public class MainActivity extends Activity {
     @Override protected void onResume(){
         super.onResume();
         startLocation();
-        if(liveCamera!=null && checkSelfPermission(Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED) liveCamera.start();
+        if(liveCamera!=null && checkSelfPermission(Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED) startCameraSafely();
     }
     @Override protected void onPause(){
         if(liveCamera!=null)liveCamera.stop();
