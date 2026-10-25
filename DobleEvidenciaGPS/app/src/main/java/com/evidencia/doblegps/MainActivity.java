@@ -50,7 +50,7 @@ import java.util.concurrent.Executors;
 public class MainActivity extends Activity {
     private static final int LOCATION_REQUEST = 41, CAMERA_REQUEST = 42;
     private static final int BG = Color.rgb(12, 23, 38);
-    private static final int PANE_W = 1060, PANE_H = 1100;
+    private static final int PANE_W = 1080, PANE_H = 1215;
     private static final long TILE_CACHE_MS = 7L * 24 * 60 * 60 * 1000;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Frame[] frames = {new Frame(), new Frame()};
@@ -65,12 +65,12 @@ public class MainActivity extends Activity {
         }
     };
 
-    private TextView gpsLabel, waitLabel, firstLabel, secondLabel, statusLabel, cameraStatus;
+    private TextView gpsLabel, stepLabel, statusLabel, cameraStatus;
     private TextureView livePreview;
     private LiveCamera liveCamera;
+    private Button actionButton, newButton;
+    private boolean secondStepStarted;
     private long pendingPhotoTime;
-    private ImageView firstPreview, secondPreview, finalPreview;
-    private Button firstButton, secondButton, retryButton, saveButton, openButton, shareButton;
     private Uri pendingOriginal, compositeUri;
     private Location launchLocation;
     private int pendingSlot = -1;
@@ -135,56 +135,55 @@ public class MainActivity extends Activity {
         return v;
     }
     private void makeUi() {
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.setBackgroundColor(BG);
-        LinearLayout main = new LinearLayout(this);
-        main.setPadding(dp(15), dp(18), dp(15), dp(32));
+        LinearLayout main=new LinearLayout(this);
         main.setOrientation(LinearLayout.VERTICAL);
-        scroll.addView(main);
-
-        TextView heading = text("DOBLE EVIDENCIA GPS", 22, Color.WHITE);
-        heading.setTypeface(null, 1);
+        main.setBackgroundColor(BG);
+        main.setPadding(dp(12),dp(15),dp(12),dp(16));
+        main.setOnApplyWindowInsetsListener((view,insets)->{
+            if(android.os.Build.VERSION.SDK_INT>=30) {
+                android.graphics.Insets b=insets.getInsets(android.view.WindowInsets.Type.systemBars());
+                view.setPadding(dp(12),b.top+dp(10),dp(12),b.bottom+dp(14));
+            }
+            return insets;
+        });
+        TextView heading=text("DOBLE EVIDENCIA GPS",21,Color.WHITE);
+        heading.setGravity(Gravity.CENTER);
+        heading.setTypeface(null,1);
         main.addView(heading);
-        main.addView(text("V3.1 • Cámara integrada • Mapas GPS", 13, Color.rgb(170, 189, 207)));
-
-        gpsLabel = text("Buscando ubicación GPS...", 13, Color.rgb(132, 214, 240));
+        gpsLabel=text("Buscando ubicación para el mapa...",13,Color.rgb(143,212,240));
+        gpsLabel.setGravity(Gravity.CENTER);
         main.addView(gpsLabel);
-        cameraStatus = text("Iniciando cámara gran angular en vivo...", 13, Color.rgb(151,215,239));
+        cameraStatus=text("Cámara en vivo...",12,Color.rgb(180,205,223));
+        cameraStatus.setGravity(Gravity.CENTER);
         main.addView(cameraStatus);
-        livePreview = new TextureView(this);
+        livePreview=new TextureView(this);
         livePreview.setOpaque(true);
-        // TextureView no permite fondos Drawable; configurarlo provoca crash al iniciar.
-        main.addView(livePreview,new LinearLayout.LayoutParams(-1,dp(285)));
-        liveCamera = new LiveCamera(this,livePreview,message -> cameraStatus.setText(message));
-        firstButton = button(main, "TOMAR PRIMERA FOTOGRAFÍA", () -> capture(0));
-        firstLabel = text("Primera captura pendiente", 12, Color.LTGRAY);
-        main.addView(firstLabel);
-        firstPreview = preview(main, 235);
-        firstPreview.setOnClickListener(v -> viewFrame(0));
-        waitLabel = text("TIEMPO DE ESPERA  --:--:--", 21, Color.rgb(255, 64, 76));
-        waitLabel.setTypeface(null, 1);
-        waitLabel.setGravity(Gravity.CENTER);
-        waitLabel.setPadding(0, dp(18), 0, dp(15));
-        main.addView(waitLabel);
-        secondButton = button(main, "TOMAR SEGUNDA FOTOGRAFÍA", () -> capture(1));
-        secondLabel = text("Segunda captura pendiente", 12, Color.LTGRAY);
-        main.addView(secondLabel);
-        secondPreview = preview(main, 235);
-        secondPreview.setOnClickListener(v -> viewFrame(1));
-        statusLabel = text("Se guardan las fotos con su mapa y la comparación final.", 13, Color.rgb(180, 204, 223));
+        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,0,1f);
+        lp.setMargins(0,dp(10),0,dp(10));
+        main.addView(livePreview,lp);
+        liveCamera=new LiveCamera(this,livePreview,message->cameraStatus.setText(message));
+        stepLabel=text("PASO 1 DE 3 · Primera fotografía",16,Color.WHITE);
+        stepLabel.setTypeface(null,1);
+        stepLabel.setGravity(Gravity.CENTER);
+        main.addView(stepLabel);
+        actionButton=button(main,"TOMAR PRIMERA FOTO",this::advance);
+        actionButton.setTextSize(18);
+        statusLabel=text("Cada foto incluirá mapa, fecha, hora, ciudad y sector.",12,Color.rgb(190,205,224));
+        statusLabel.setGravity(Gravity.CENTER);
         main.addView(statusLabel);
-        retryButton = button(main, "REINTENTAR CARGA DE MAPAS", this::retryMaps);
-        saveButton = button(main, "GUARDAR IMAGEN HORIZONTAL", this::saveComposite);
-        openButton = button(main, "VER IMAGEN FINAL", this::viewComposite);
-        finalPreview = preview(main, 230);
-        finalPreview.setOnClickListener(v -> viewComposite());
-        shareButton = button(main, "COMPARTIR EVIDENCIA", this::shareComposite);
-        button(main, "NUEVA EVIDENCIA", this::newSession);
-        main.addView(text("Mapa real © OpenStreetMap contributors. Para incrustarlo se necesita GPS e Internet al tomar las fotos. Una vez guardadas, las imágenes funcionan sin Internet.", 12, Color.rgb(172, 193, 207)));
-        setContentView(scroll);
+        newButton=button(main,"NUEVA EVIDENCIA",this::newSession);
+        newButton.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.rgb(55,70,86)));
+        main.addView(text("Mapas © OpenStreetMap contributors",11,Color.rgb(154,174,192)));
+        setContentView(main);
     }
-
+    private void advance(){
+        if(frames[0].original==null){capture(0);return;}
+        if(!secondStepStarted){secondStepStarted=true;updateUi();return;}
+        if(frames[1].original==null){capture(1);return;}
+        if(compositeUri!=null){viewComposite();return;}
+        if(frames[0].failed||frames[1].failed){retryMaps();return;}
+        if(frames[0].mapReady&&frames[1].mapReady)saveComposite();
+    }
     private void startCameraSafely() {
         if(liveCamera==null || checkSelfPermission(Manifest.permission.CAMERA)!=PackageManager.PERMISSION_GRANTED)return;
         try {
@@ -229,9 +228,7 @@ public class MainActivity extends Activity {
     private void refreshGps() {
         if (gpsLabel == null) return;
         Location l = currentLocation();
-        gpsLabel.setText(l == null ? "Esperando GPS reciente (necesario para el mapa real)" :
-            String.format(Locale.US, "GPS %.6f, %.6f • ±%.0f m", l.getLatitude(), l.getLongitude(),
-                l.hasAccuracy() ? l.getAccuracy() : 0));
+        gpsLabel.setText(l==null?"Buscando ubicación para el mapa...":"Ubicación lista para el mapa");
     }
 
     private void capture(int index) {
@@ -336,13 +333,7 @@ public class MainActivity extends Activity {
     private void processFrame(int index, Frame f, long requestedSession) {
         try {
             Bitmap source=loadPhoto(f.original);
-            // La foto original se muestra en pantalla antes de consultar el mapa.
-            runOnUiThread(() -> {
-                if(requestedSession==sessionToken && frames[index]==f){
-                    f.preview=source;
-                    updateUi();
-                }
-            });
+            // Sin vista previa de fotografías tomadas: permanece activa la cámara en vivo.
             if (f.location == null) throw new Exception("Ubicación GPS no disponible; activa GPS para nueva captura.");
             // El mapa y la geocodificación se calculan fuera de la pantalla de cámara.
             enrichAddress(f);
@@ -360,7 +351,7 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> {
                 if(requestedSession!=sessionToken || frames[index]!=f)return;
                 updateUi();
-                if(frames[0].mapReady&&frames[1].mapReady)saveComposite();
+                // El usuario confirma el guardado con el botón principal.
             });
         } catch(Exception ex) {
             f.processing=false;
@@ -507,61 +498,51 @@ public class MainActivity extends Activity {
         }catch(Exception ignored){}
     }
 
-    private Bitmap stamp(Bitmap source, Bitmap map, Frame f) {
-        Bitmap canvasBitmap=Bitmap.createBitmap(PANE_W,PANE_H,Bitmap.Config.ARGB_8888);
-        Canvas canvas=new Canvas(canvasBitmap);
-        canvas.drawColor(Color.rgb(23,28,35));
+    private Bitmap stamp(Bitmap source,Bitmap map,Frame f){
+        Bitmap out=Bitmap.createBitmap(PANE_W,PANE_H,Bitmap.Config.ARGB_8888);
+        Canvas c=new Canvas(out);
         Paint p=new Paint(3);
-        // FIT_CENTER: se conserva toda la foto, sin recortar rostros, vehículos ni evidencia.
-        float scale=Math.min((float)PANE_W/source.getWidth(),(float)PANE_H/source.getHeight());
-        int nw=Math.round(source.getWidth()*scale),nh=Math.round(source.getHeight()*scale);
-        int left=(PANE_W-nw)/2,top=(PANE_H-nh)/2;
-        canvas.drawBitmap(source,null,new Rect(left,top,left+nw,top+nh),p);
-        // Brújula visual simple. No inventar orientación si el GPS no tiene bearing.
-        p.setColor(Color.argb(125,12,18,24));
-        canvas.drawCircle(70,75,57,p);
-        p.setColor(Color.WHITE);p.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        p.setTextAlign(Paint.Align.CENTER);p.setTextSize(24);
-        canvas.drawText("N",70,32,p);
-        p.setColor(Color.CYAN);
-        Path needle=new Path();
-        needle.moveTo(70,42);needle.lineTo(55,110);needle.lineTo(70,96);needle.lineTo(85,110);needle.close();
-        canvas.drawPath(needle,p);
-        p.setTextAlign(Paint.Align.LEFT);
-        // Mapa real bajo a la izquierda, similar a la referencia.
-        int mapLeft=15,mapBottom=PANE_H-18,mapWidth=360,mapHeight=274;
+        // Relleno proporcional sin bordes negros. El recorte mantiene el centro de la foto.
+        float ratio=(float)source.getWidth()/source.getHeight();
+        float wanted=(float)PANE_W/PANE_H;
+        Rect sourceCrop;
+        if(ratio>wanted){
+            int cropWidth=Math.round(source.getHeight()*wanted);
+            int x=(source.getWidth()-cropWidth)/2;
+            sourceCrop=new Rect(x,0,x+cropWidth,source.getHeight());
+        }else{
+            int cropHeight=Math.round(source.getWidth()/wanted);
+            int y=(source.getHeight()-cropHeight)/2;
+            sourceCrop=new Rect(0,y,source.getWidth(),y+cropHeight);
+        }
+        c.drawBitmap(source,sourceCrop,new Rect(0,0,PANE_W,PANE_H),p);
+        int mapX=14,mapW=345,mapH=270,mapY=PANE_H-mapH-15;
         p.setColor(Color.WHITE);
-        canvas.drawRoundRect(new RectF(mapLeft-3,mapBottom-mapHeight-3,
-                mapLeft+mapWidth+3,mapBottom+3),8,8,p);
-        canvas.drawBitmap(map,mapLeft,mapBottom-mapHeight,p);
-        // Información blanca, grande y semitransparente, sin "Foto 1/2".
-        int boxLeft=384, boxTop=PANE_H-395;
-        p.setColor(Color.argb(95,4,8,12));
-        canvas.drawRoundRect(new RectF(boxLeft,boxTop,PANE_W-12,PANE_H-16),18,18,p);
+        c.drawRoundRect(new RectF(mapX-3,mapY-3,mapX+mapW+3,mapY+mapH+3),8,8,p);
+        c.drawBitmap(map,null,new Rect(mapX,mapY,mapX+mapW,mapY+mapH),p);
+        p.setColor(Color.argb(78,5,11,17));
+        c.drawRoundRect(new RectF(374,PANE_H-314,PANE_W-10,PANE_H-18),14,14,p);
         p.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         p.setTextAlign(Paint.Align.RIGHT);
-        p.setShadowLayer(4,1,2,Color.BLACK);
+        p.setShadowLayer(3,1,2,Color.BLACK);
         p.setColor(Color.WHITE);
-        p.setTextSize(40);
-        float right=PANE_W-31;
-        canvas.drawText(formatDate(f.capturedAt),right,PANE_H-330,p);
-        p.setTextSize(50);
-        canvas.drawText(formatTime(f.capturedAt),right,PANE_H-271,p);
-        p.setTextSize(31);
-        canvas.drawText(String.format(Locale.US,"%.6f, %.6f",f.location.getLatitude(),
-            f.location.getLongitude()),right,PANE_H-217,p);
-        p.setTextSize(28);
-        if(f.location.hasAccuracy()){
-            canvas.drawText(String.format(Locale.US,"GPS ±%.0f m",f.location.getAccuracy()),right,PANE_H-172,p);
+        float x=PANE_W-31;
+        p.setTextSize(43);
+        c.drawText(formatDate(f.capturedAt),x,PANE_H-260,p);
+        p.setTextSize(52);
+        c.drawText(formatTime(f.capturedAt),x,PANE_H-202,p);
+        p.setTextSize(33);
+        c.drawText(fitLabel(part(f.city),p,645),x,PANE_H-147,p);
+        if(!part(f.valley).isEmpty()){
+            p.setTextSize(30);
+            c.drawText(fitLabel(f.valley,p,645),x,PANE_H-98,p);
         }
-        p.setTextSize(31);
-        canvas.drawText(fitLabel(f.city, p, 638),right,PANE_H-124,p);
-        p.setTextSize(29);
-        canvas.drawText(fitLabel(f.valley, p, 638),right,PANE_H-81,p);
-        canvas.drawText(fitLabel(f.sector, p, 638),right,PANE_H-39,p);
+        if(!part(f.sector).isEmpty()){
+            p.setTextSize(29);
+            c.drawText(fitLabel(f.sector,p,645),x,PANE_H-51,p);
+        }
         p.clearShadowLayer();
-        p.setTextAlign(Paint.Align.LEFT);
-        return canvasBitmap;
+        return out;
     }
     private String formatDate(long epoch){
         return new SimpleDateFormat("dd/MM/yyyy",Locale.getDefault()).format(new Date(epoch));
@@ -588,8 +569,8 @@ public class MainActivity extends Activity {
         if(compositeUri!=null){viewComposite();return;}
         final Frame a=frames[0],b=frames[1];
         final long current=sessionToken;
-        statusLabel.setText("Creando imagen horizontal...");
-        saveButton.setEnabled(false);
+        statusLabel.setText("Guardando imagen horizontal...");
+        actionButton.setEnabled(false);
         worker.execute(() -> {
             try{
                 Bitmap whole=Bitmap.createBitmap(PANE_W*2,PANE_H,Bitmap.Config.ARGB_8888);
@@ -619,15 +600,15 @@ public class MainActivity extends Activity {
                 runOnUiThread(() -> {
                     if(current!=sessionToken)return;
                     compositeUri=target;
-                    finalPreview.setImageBitmap(whole);
                     updateUi();
-                    toast("Imagen horizontal guardada con ambos mapas.");
+                    viewComposite();
+                    toast("Evidencia guardada en Galería.");
                 });
             }catch(Exception e){
                 runOnUiThread(() -> {
                     if(current==sessionToken){
                         statusLabel.setText("Error guardando evidencia: "+e.getMessage());
-                        saveButton.setEnabled(true);
+                        actionButton.setEnabled(true);
                     }
                 });
             }
@@ -648,20 +629,12 @@ public class MainActivity extends Activity {
         if(retry==0)toast("No hay mapas reintentables; para nueva ubicación usa NUEVA EVIDENCIA.");
         updateUi();
     }
-    private void viewFrame(int index){
-        Uri uri=frames[index].annotated!=null?frames[index].annotated:frames[index].original;
-        if(uri==null)return;
-        Intent intent=new Intent(Intent.ACTION_VIEW);
-        intent.setDataAndType(uri,"image/jpeg");
-        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        try{startActivity(intent);}catch(Exception e){toast("Abre la fotografía desde Galería");}
-    }
     private void viewComposite(){
         if(compositeUri==null)return;
-        Intent intent=new Intent(Intent.ACTION_VIEW);
-        intent.setDataAndType(compositeUri,"image/jpeg");
-        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        try{startActivity(intent);}catch(Exception e){toast("Abre Galería > DobleEvidenciaGPS");}
+        Intent i=new Intent(this,EvidenceViewerActivity.class);
+        i.setData(compositeUri);
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try{startActivity(i);}catch(Exception ex){toast("Abre Galería > DobleEvidenciaGPS");}
     }
     private void shareComposite(){
         if(compositeUri==null)return;
@@ -672,33 +645,48 @@ public class MainActivity extends Activity {
         startActivity(Intent.createChooser(intent,"Compartir evidencia"));
     }
     private void newSession(){
-        frames[0]=new Frame();frames[1]=new Frame();
-        compositeUri=null;sessionToken=System.currentTimeMillis();
-        finalPreview.setImageDrawable(null);
+        if(pendingSlot>=0){toast("Termina la captura actual.");return;}
+        frames[0]=new Frame();
+        frames[1]=new Frame();
+        compositeUri=null;
+        sessionToken=System.currentTimeMillis();
+        secondStepStarted=false;
         updateUi();
-        toast("Nueva evidencia iniciada. Las fotos guardadas permanecen en Galería.");
     }
     private void updateUi(){
-        firstPreview.setImageBitmap(frames[0].preview);
-        secondPreview.setImageBitmap(frames[1].preview);
-        firstButton.setEnabled(frames[0].original==null);
-        secondButton.setEnabled(frames[0].original!=null && frames[1].original==null);
-        firstLabel.setText(describe(frames[0]));
-        secondLabel.setText(describe(frames[1]));
-        waitLabel.setText("TIEMPO DE ESPERA  "+elapsed());
+        boolean first=frames[0].original!=null;
+        boolean second=frames[1].original!=null;
         boolean ready=frames[0].mapReady&&frames[1].mapReady;
-        saveButton.setEnabled(ready&&compositeUri==null);
-        openButton.setEnabled(compositeUri!=null);
-        shareButton.setEnabled(compositeUri!=null);
-        retryButton.setEnabled((frames[0].failed||frames[1].failed) &&
-                (frames[0].location!=null||frames[1].location!=null));
-        if(compositeUri!=null)statusLabel.setText("Imagen horizontal guardada. Toca la vista previa para ampliarla.");
-        else if(frames[0].failed||frames[1].failed) {
-            String e=frames[0].failed?frames[0].error:frames[1].error;
-            statusLabel.setText("Faltó el mapa real: "+e+" · revisa Internet y usa REINTENTAR.");
+        boolean failed=frames[0].failed||frames[1].failed;
+        if(!first){
+            stepLabel.setText("PASO 1 DE 3 · Primera fotografía");
+            actionButton.setText("TOMAR PRIMERA FOTO");
+        }else if(!secondStepStarted){
+            stepLabel.setText("PRIMERA FOTO GUARDADA");
+            actionButton.setText("SIGUIENTE");
+        }else if(!second){
+            stepLabel.setText("PASO 2 DE 3 · Segunda fotografía");
+            actionButton.setText("TOMAR SEGUNDA FOTO");
+        }else if(compositeUri!=null){
+            stepLabel.setText("EVIDENCIA GUARDADA");
+            actionButton.setText("VER RESULTADO");
+        }else{
+            stepLabel.setText("PASO 3 DE 3 · Guardar");
+            actionButton.setText(failed?"REINTENTAR MAPAS":ready?"GUARDAR EVIDENCIA":"PREPARANDO MAPAS...");
         }
-        else if(frames[0].processing||frames[1].processing)statusLabel.setText("Foto visible. Cargando mapa real en segundo plano...");
-        else statusLabel.setText("Las dos fotos llevarán mapa real, pin rojo y fecha/hora.");
+        actionButton.setEnabled(pendingSlot<0&&(!second||failed||ready||compositeUri!=null));
+        newButton.setVisibility(compositeUri!=null?android.view.View.VISIBLE:android.view.View.GONE);
+        if(compositeUri!=null){
+            statusLabel.setText("Evidencia guardada. Pulsa VER RESULTADO para ampliarla.");
+        }else if(failed){
+            statusLabel.setText("Mapa pendiente: "+(frames[0].failed?frames[0].error:frames[1].error));
+        }else if(second){
+            statusLabel.setText("Tiempo de espera: "+elapsed()+" · Preparando los mapas.");
+        }else if(first){
+            statusLabel.setText("Primera foto lista. La cámara continúa en vivo.");
+        }else{
+            statusLabel.setText("Fecha, hora, ciudad, sector y mapa en cada fotografía.");
+        }
         refreshGps();
     }
     private String describe(Frame frame){
