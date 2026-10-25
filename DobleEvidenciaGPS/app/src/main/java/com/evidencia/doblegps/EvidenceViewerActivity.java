@@ -2,8 +2,10 @@ package com.evidencia.doblegps;
 
 import android.app.Activity;
 import android.content.Intent;
-import android.content.pm.ActivityInfo;
 import android.graphics.Color;
+import android.graphics.RenderEffect;
+import android.graphics.Shader;
+import android.os.Build;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.Gravity;
@@ -15,7 +17,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.graphics.drawable.GradientDrawable;
 
-/** Vista final apaisada: la fotografía rellena toda la pantalla y permite compartirla. */
+/** Resultado visible en vertical sin girar el teléfono; muestra toda la evidencia horizontal. */
 public final class EvidenceViewerActivity extends Activity {
     private Uri image;
 
@@ -23,7 +25,6 @@ public final class EvidenceViewerActivity extends Activity {
         super.onCreate(bundle);
         image=getIntent().getData();
         if(image==null){finish();return;}
-        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
             WindowManager.LayoutParams.FLAG_FULLSCREEN);
         getWindow().getDecorView().setSystemUiVisibility(
@@ -35,8 +36,18 @@ public final class EvidenceViewerActivity extends Activity {
             View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
         FrameLayout stage=new FrameLayout(this);
         stage.setBackgroundColor(Color.BLACK);
+        // Relleno visual usando la misma evidencia, sin barras negras ni recortar el original.
+        ImageView backdrop=new ImageView(this);
+        backdrop.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        backdrop.setImageURI(image);
+        backdrop.setAlpha(0.65f);
+        if(Build.VERSION.SDK_INT>=31){
+            backdrop.setRenderEffect(RenderEffect.createBlurEffect(
+                dp(24),dp(24),Shader.TileMode.CLAMP));
+        }
+        stage.addView(backdrop,new FrameLayout.LayoutParams(-1,-1));
         ImageView photo=new ImageView(this);
-        photo.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        photo.setScaleType(ImageView.ScaleType.FIT_CENTER);
         photo.setImageURI(image);
         stage.addView(photo,new FrameLayout.LayoutParams(-1,-1));
         LinearLayout actions=new LinearLayout(this);
