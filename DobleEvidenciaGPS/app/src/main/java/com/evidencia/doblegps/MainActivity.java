@@ -259,7 +259,7 @@ public class MainActivity extends Activity {
         long now=SystemClock.elapsedRealtime();
         for(Location loc:candidates){
             long age=now-loc.getElapsedRealtimeNanos()/1000000L;
-            if(age<0||age>45000)continue;
+            if(age<0||age>20000)continue;
             float accuracy=loc.hasAccuracy()?loc.getAccuracy():150f;
             // Se evita sustituir una lectura precisa por otra reciente pero inexacta.
             float score=accuracy*2f+age/2500f;
