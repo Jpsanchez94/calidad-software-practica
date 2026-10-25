@@ -64,6 +64,7 @@ public class MainActivity extends Activity {
     private ImageView firstPreview, secondPreview, finalPreview;
     private Button firstButton, secondButton, retryButton, saveButton, openButton, shareButton;
     private Uri pendingOriginal, compositeUri;
+    private Location launchLocation;
     private int pendingSlot = -1;
     private long sessionToken;
 
@@ -141,7 +142,8 @@ public class MainActivity extends Activity {
         firstButton = button(main, "TOMAR PRIMERA FOTOGRAFÍA", () -> capture(0));
         firstLabel = text("Primera captura pendiente", 12, Color.LTGRAY);
         main.addView(firstLabel);
-        firstPreview = preview(main, 190);
+        firstPreview = preview(main, 235);
+        firstPreview.setOnClickListener(v -> viewFrame(0));
         waitLabel = text("TIEMPO DE ESPERA  --:--:--", 21, Color.rgb(255, 64, 76));
         waitLabel.setTypeface(null, 1);
         waitLabel.setGravity(Gravity.CENTER);
@@ -150,7 +152,8 @@ public class MainActivity extends Activity {
         secondButton = button(main, "TOMAR SEGUNDA FOTOGRAFÍA", () -> capture(1));
         secondLabel = text("Segunda captura pendiente", 12, Color.LTGRAY);
         main.addView(secondLabel);
-        secondPreview = preview(main, 190);
+        secondPreview = preview(main, 235);
+        secondPreview.setOnClickListener(v -> viewFrame(1));
         statusLabel = text("Se guardan las fotos con su mapa y la comparación final.", 13, Color.rgb(180, 204, 223));
         main.addView(statusLabel);
         retryButton = button(main, "REINTENTAR CARGA DE MAPAS", this::retryMaps);
@@ -214,6 +217,7 @@ public class MainActivity extends Activity {
         Uri uri = createImage("Original_" + sessionToken + "_" + (index+1) + ".jpg");
         if (uri == null) { toast("No se pudo crear el archivo de la cámara."); return; }
         pendingOriginal = uri;
+        launchLocation = currentLocation();
         pendingSlot = index;
         Intent capture = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
         capture.putExtra(MediaStore.EXTRA_OUTPUT, uri);
@@ -246,7 +250,9 @@ public class MainActivity extends Activity {
             if (image!=null) getContentResolver().delete(image,null,null);
             toast("Captura cancelada."); return;
         }
-        final Location coords=currentLocation();
+        final Location fresh=currentLocation();
+        final Location coords=fresh!=null?fresh:launchLocation;
+        launchLocation=null;
         if (coords==null) {
             // Conservar el original, pero no simular ubicación.
             toast("No se obtuvo GPS reciente. La imagen quedará pendiente hasta recuperar la ubicación.");
@@ -554,6 +560,14 @@ public class MainActivity extends Activity {
         }
         if(retry==0)toast("No hay mapas reintentables; para nueva ubicación usa NUEVA EVIDENCIA.");
         updateUi();
+    }
+    private void viewFrame(int index){
+        Uri uri=frames[index].annotated!=null?frames[index].annotated:frames[index].original;
+        if(uri==null)return;
+        Intent intent=new Intent(Intent.ACTION_VIEW);
+        intent.setDataAndType(uri,"image/jpeg");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try{startActivity(intent);}catch(Exception e){toast("Abre la fotografía desde Galería");}
     }
     private void viewComposite(){
         if(compositeUri==null)return;
