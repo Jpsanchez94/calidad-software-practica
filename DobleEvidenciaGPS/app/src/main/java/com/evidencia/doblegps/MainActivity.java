@@ -35,6 +35,9 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.widget.FrameLayout;
+import android.view.View;
+import android.graphics.drawable.GradientDrawable;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
@@ -69,6 +72,7 @@ public class MainActivity extends Activity {
     private TextureView livePreview;
     private LiveCamera liveCamera;
     private Button actionButton, newButton;
+    private FrameLayout shutterButton;
     private boolean secondStepStarted;
     private long pendingPhotoTime;
     private Uri pendingOriginal, compositeUri;
@@ -156,17 +160,44 @@ public class MainActivity extends Activity {
         cameraStatus=text("Cámara en vivo...",12,Color.rgb(180,205,223));
         cameraStatus.setGravity(Gravity.CENTER);
         main.addView(cameraStatus);
-        livePreview=new TextureView(this);
-        livePreview.setOpaque(true);
+        FrameLayout cameraStage=new FrameLayout(this);
         LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,0,1f);
         lp.setMargins(0,dp(10),0,dp(10));
-        main.addView(livePreview,lp);
+        main.addView(cameraStage,lp);
+        livePreview=new TextureView(this);
+        livePreview.setOpaque(true);
+        cameraStage.addView(livePreview,new FrameLayout.LayoutParams(-1,-1));
         liveCamera=new LiveCamera(this,livePreview,message->cameraStatus.setText(message));
+        // Obturador circular real, superpuesto al visor sin abrir otra cámara.
+        shutterButton=new FrameLayout(this);
+        GradientDrawable outer=new GradientDrawable();
+        outer.setShape(GradientDrawable.OVAL);
+        outer.setColor(0x66000000);
+        outer.setStroke(dp(4),Color.WHITE);
+        shutterButton.setBackground(outer);
+        shutterButton.setContentDescription("Tomar fotografía");
+        shutterButton.setClickable(true);
+        shutterButton.setFocusable(true);
+        View circle=new View(this);
+        GradientDrawable inner=new GradientDrawable();
+        inner.setShape(GradientDrawable.OVAL);
+        inner.setColor(Color.WHITE);
+        circle.setBackground(inner);
+        FrameLayout.LayoutParams center=new FrameLayout.LayoutParams(dp(59),dp(59),Gravity.CENTER);
+        shutterButton.addView(circle,center);
+        FrameLayout.LayoutParams shutterLayout=new FrameLayout.LayoutParams(
+            dp(82),dp(82),Gravity.BOTTOM|Gravity.CENTER_HORIZONTAL);
+        shutterLayout.bottomMargin=dp(20);
+        cameraStage.addView(shutterButton,shutterLayout);
+        shutterButton.setOnClickListener(v -> {
+            if(frames[0].original==null)capture(0);
+            else if(secondStepStarted && frames[1].original==null)capture(1);
+        });
         stepLabel=text("PASO 1 DE 3 · Primera fotografía",16,Color.WHITE);
         stepLabel.setTypeface(null,1);
         stepLabel.setGravity(Gravity.CENTER);
         main.addView(stepLabel);
-        actionButton=button(main,"TOMAR PRIMERA FOTO",this::advance);
+        actionButton=button(main,"SIGUIENTE",this::advance);
         actionButton.setTextSize(18);
         statusLabel=text("Cada foto incluirá mapa, fecha, hora, ciudad y sector.",12,Color.rgb(190,205,224));
         statusLabel.setGravity(Gravity.CENTER);
@@ -659,14 +690,14 @@ public class MainActivity extends Activity {
         boolean ready=frames[0].mapReady&&frames[1].mapReady;
         boolean failed=frames[0].failed||frames[1].failed;
         if(!first){
-            stepLabel.setText("PASO 1 DE 3 · Primera fotografía");
-            actionButton.setText("TOMAR PRIMERA FOTO");
+            stepLabel.setText("PASO 1 DE 3 · Toca el botón circular para fotografiar");
+            actionButton.setText("SIGUIENTE");
         }else if(!secondStepStarted){
             stepLabel.setText("PRIMERA FOTO GUARDADA");
             actionButton.setText("SIGUIENTE");
         }else if(!second){
-            stepLabel.setText("PASO 2 DE 3 · Segunda fotografía");
-            actionButton.setText("TOMAR SEGUNDA FOTO");
+            stepLabel.setText("PASO 2 DE 3 · Usa el botón circular");
+            actionButton.setText("SIGUIENTE");
         }else if(compositeUri!=null){
             stepLabel.setText("EVIDENCIA GUARDADA");
             actionButton.setText("VER RESULTADO");
@@ -674,8 +705,14 @@ public class MainActivity extends Activity {
             stepLabel.setText("PASO 3 DE 3 · Guardar");
             actionButton.setText(failed?"REINTENTAR MAPAS":ready?"GUARDAR EVIDENCIA":"PREPARANDO MAPAS...");
         }
+        boolean showShutter=!first||(secondStepStarted&&!second);
+        shutterButton.setVisibility(showShutter?View.VISIBLE:View.GONE);
+        shutterButton.setEnabled(showShutter&&pendingSlot<0);
+        shutterButton.setAlpha(pendingSlot<0?1f:0.55f);
+        boolean showAction=first&&(!secondStepStarted||second);
+        actionButton.setVisibility(showAction?View.VISIBLE:View.GONE);
         actionButton.setEnabled(pendingSlot<0&&(!second||failed||ready||compositeUri!=null));
-        newButton.setVisibility(compositeUri!=null?android.view.View.VISIBLE:android.view.View.GONE);
+        newButton.setVisibility(compositeUri!=null?View.VISIBLE:View.GONE);
         if(compositeUri!=null){
             statusLabel.setText("Evidencia guardada. Pulsa VER RESULTADO para ampliarla.");
         }else if(failed){
